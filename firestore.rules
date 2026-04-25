@@ -1,0 +1,84 @@
+rules_version = '2';
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: products
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required, max 100 chars)
+//   - category: string (required, max 50 chars)
+//   - price: number (required, >= 0)
+//   - quantity: number (required, >= 0)
+//
+// Collection: orders
+// Document ID: auto-generated
+// Fields:
+//   - date: string (required, max 100 chars)
+//   - timestamp: number (optional)
+//   - totalPrice: number (required, >= 0)
+//   - items: list (required, max 50 items)
+//   - userId: string (required, must match creator's uid)
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ===============================================================
+    // Product Validators
+    // ===============================================================
+    function hasRequiredProductFields() {
+      return request.resource.data.keys().hasAll(['name', 'category', 'price', 'quantity']);
+    }
+
+    function isValidProduct() {
+      return request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 100 &&
+             request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() < 50 &&
+             request.resource.data.price is number && request.resource.data.price >= 0 &&
+             request.resource.data.quantity is number && request.resource.data.quantity >= 0;
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && hasRequiredProductFields() && isValidProduct();
+      // On update, we require it to remain a valid product (so don't delete required fields)
+      allow update: if isAuthenticated() && hasRequiredProductFields() && isValidProduct();
+      allow delete: if isAuthenticated();
+    }
+
+    // ===============================================================
+    // Order Validators
+    // ===============================================================
+    function hasRequiredOrderFields() {
+      return request.resource.data.keys().hasAll(['date', 'totalPrice', 'items', 'userId']);
+    }
+
+    function isValidOrder() {
+      return request.resource.data.date is string && request.resource.data.date.size() < 100 &&
+             request.resource.data.totalPrice is number && request.resource.data.totalPrice >= 0 &&
+             request.resource.data.items is list && request.resource.data.items.size() > 0 && request.resource.data.items.size() <= 50 &&
+             request.resource.data.userId == request.auth.uid &&
+             (!('timestamp' in request.resource.data) || request.resource.data.timestamp is number);
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && hasRequiredOrderFields() && isValidOrder();
+      // Orders generally shouldn't be altered once placed in this simple ERP, but we'll allow basic updates.
+      // Must not change userId.
+      allow update: if isAuthenticated() && hasRequiredOrderFields() && isValidOrder() &&
+                    request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated();
+    }
+  }
+}
